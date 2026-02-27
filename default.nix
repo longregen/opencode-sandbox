@@ -386,10 +386,6 @@ let
             EXTRA_ENVS+=("$env_pair")
           done < <(jq -r '.extraEnvs[]? // empty' "$CONFIG_FILE" 2>/dev/null)
 
-          # Read yolo option - add --yolo if set to true
-          if jq -e '.yolo == true' "$CONFIG_FILE" >/dev/null 2>&1; then
-            OPENCODE_ARGS+=("--yolo")
-          fi
 
           # Read socksProxy option - force all traffic through a SOCKS proxy
           if [ -z "$SOCKS_PROXY" ]; then
@@ -664,7 +660,7 @@ NSEOF
 
     # Create config file with empty structure if it doesn't exist
     if [ ! -f "$CONFIG_FILE" ]; then
-      echo '{"includeFolders":[],"includeHomePatterns":[],"gui":false,"yolo":false}' > "$CONFIG_FILE"
+      echo '{"includeFolders":[],"includeHomePatterns":[],"gui":false}' > "$CONFIG_FILE"
     fi
 
     # Check if jq is available
