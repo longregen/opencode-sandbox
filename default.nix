@@ -14,10 +14,11 @@
 }:
 
 let
+  # Default opencode config
+  defaultConfig = ./opencode.jsonc;
+
   # Create the sandboxed wrapper script
   sandboxWrapper = writeShellScript "opencode-sandbox" ''
-    #!${stdenv.shell}
-
     # Parse command line flags
     ENABLE_FUSE=0
     ENABLE_SSH_GIT=0
@@ -96,15 +97,23 @@ let
     mkdir -p "$SANDBOX_HOME/$(echo "$PWD" | sed "s|^/home/$USER||")"
     USER=$(whoami)
 
+    # Install default config if user has no opencode config at all.
+    # This config disables subagents (which hang forever when streams stall)
+    # and sets sane defaults for sandboxed operation.
+    if [ ! -d "$HOME/.config/opencode" ] && [ ! -f "$HOME/.opencode/opencode.json" ] && [ ! -f "$PWD/opencode.json" ] && [ ! -f "$PWD/opencode.jsonc" ]; then
+      mkdir -p "$SANDBOX_HOME/.config/opencode"
+      cp "$out/share/opencode/opencode.jsonc" "$SANDBOX_HOME/.config/opencode/opencode.jsonc"
+    fi
+
     # Only allow access to current project directory and essential system files
     ALLOWLIST=(
       "$SANDBOX_HOME:/home/$USER"
       "$PWD"                # current project dir (read-write)
       "ro:/etc"             # System configuration (read-only)
-      "/nix"
       "ro:/run/current-system/sw"
       "ro:/bin/sh"
       "ro:/usr/bin/env"     # env command
+      "/nix"
       "$SANDBOX_TMP:/tmp"
     )
     HOME_ALLOW=(
@@ -344,14 +353,16 @@ let
       # Parse the JSON config file
       if command -v jq >/dev/null 2>&1; then
         if [ -f "$CONFIG_FILE" ]; then
-          # Read includeFolders array
+          # Read includePaths/includeFolders array
           while IFS= read -r folder; do
             # Expand tilde to home directory
             expanded_folder=$(echo "$folder" | sed "s|^~|$HOME|")
             if [ -d "$expanded_folder" ]; then
               ALLOWLIST+=( "$expanded_folder" )
+            elif [ -e "$expanded_folder" ]; then
+              ALLOWLIST+=( "ro:$expanded_folder" )
             fi
-          done < <(jq -r '.includeFolders[]? // empty' "$CONFIG_FILE" 2>/dev/null)
+          done < <(jq -r '(.includePaths[]? // empty), (.includeFolders[]? // empty)' "$CONFIG_FILE" 2>/dev/null)
 
           # Read includeHomePatterns array
           while IFS= read -r pattern; do
@@ -402,7 +413,6 @@ let
     fi
 
     whitelisted_envs=(
-      "SHELL"
       "PATH"
       "HOME"
       "USER"
@@ -660,7 +670,7 @@ NSEOF
 
     # Create config file with empty structure if it doesn't exist
     if [ ! -f "$CONFIG_FILE" ]; then
-      echo '{"includeFolders":[],"includeHomePatterns":[],"gui":false}' > "$CONFIG_FILE"
+      echo '{"includePaths":[],"includeHomePatterns":[],"gui":false}' > "$CONFIG_FILE"
     fi
 
     # Check if jq is available
@@ -673,13 +683,13 @@ NSEOF
     DIR="$(pwd)"
 
     # Check if directory is already in the list
-    if jq -e --arg dir "$DIR" '.includeFolders | index($dir) != null' "$CONFIG_FILE" >/dev/null 2>&1; then
+    if jq -e --arg dir "$DIR" '(.includePaths // .includeFolders // []) | index($dir) != null' "$CONFIG_FILE" >/dev/null 2>&1; then
       echo "Directory already allowed: $DIR"
       exit 0
     fi
 
-    # Add directory to includeFolders
-    jq --arg dir "$DIR" '.includeFolders += [$dir]' "$CONFIG_FILE" > "$CONFIG_FILE.tmp" && mv "$CONFIG_FILE.tmp" "$CONFIG_FILE"
+    # Add directory to includePaths
+    jq --arg dir "$DIR" '.includePaths += [$dir]' "$CONFIG_FILE" > "$CONFIG_FILE.tmp" && mv "$CONFIG_FILE.tmp" "$CONFIG_FILE"
     echo "Added to allowed directories: $DIR"
   '';
 
@@ -703,23 +713,26 @@ NSEOF
     DIR="$(pwd)"
 
     # Check if directory is in the list
-    if ! jq -e --arg dir "$DIR" '.includeFolders | index($dir) != null' "$CONFIG_FILE" >/dev/null 2>&1; then
+    if ! jq -e --arg dir "$DIR" '(.includePaths // .includeFolders // []) | index($dir) != null' "$CONFIG_FILE" >/dev/null 2>&1; then
       echo "Directory not in allowed list: $DIR"
       exit 0
     fi
 
-    # Remove directory from includeFolders
-    jq --arg dir "$DIR" '.includeFolders = (.includeFolders | map(select(. != $dir)))' "$CONFIG_FILE" > "$CONFIG_FILE.tmp" && mv "$CONFIG_FILE.tmp" "$CONFIG_FILE"
+    # Remove directory from includePaths (and includeFolders for compat)
+    jq --arg dir "$DIR" '
+      (if .includePaths then .includePaths |= map(select(. != $dir)) else . end) |
+      (if .includeFolders then .includeFolders |= map(select(. != $dir)) else . end)
+    ' "$CONFIG_FILE" > "$CONFIG_FILE.tmp" && mv "$CONFIG_FILE.tmp" "$CONFIG_FILE"
     echo "Removed from allowed directories: $DIR"
   '';
 
 in stdenv.mkDerivation rec {
   pname = "opencode-sandbox";
-  version = "1.2.4";
+  version = "1.2.27";
 
   src = fetchurl {
     url = "https://registry.npmjs.org/opencode-linux-x64/-/opencode-linux-x64-${version}.tgz";
-    sha256 = "0ymrqdkjaxw21wcvq0cbwgxxpy3h8rmshb8h3ydqvq3ajhk33a6p";
+    sha256 = "0jgjhf9rgki7qrfc96xrdv4inpvzclxvjrqids7x88srfjbwr804";
   };
 
   sourceRoot = "package";
@@ -743,6 +756,10 @@ in stdenv.mkDerivation rec {
 
     # Patch ELF interpreter for NixOS compatibility
     patchelf --set-interpreter "${glibc}/lib/ld-linux-x86-64.so.2" $out/bin/opencode-unwrapped
+
+    # Install default config for subagent-hang mitigation
+    mkdir -p $out/share/opencode
+    cp ${defaultConfig} $out/share/opencode/opencode.jsonc
 
     # Create our sandboxed wrapper
     cp ${sandboxWrapper} $out/bin/opencode-sandbox
