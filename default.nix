@@ -728,11 +728,11 @@ NSEOF
 
 in stdenv.mkDerivation rec {
   pname = "opencode-sandbox";
-  version = "1.2.27";
+  version = "1.3.3";
 
   src = fetchurl {
     url = "https://registry.npmjs.org/opencode-linux-x64/-/opencode-linux-x64-${version}.tgz";
-    sha256 = "0jgjhf9rgki7qrfc96xrdv4inpvzclxvjrqids7x88srfjbwr804";
+    sha256 = "1bl945cqn0ns1912bpcz0lbcra6cw4iffnhy9nssln5wr2990i3g";
   };
 
   sourceRoot = "package";
