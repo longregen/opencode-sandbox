@@ -72,4 +72,26 @@ if [ "$WRITTEN_VERSION" != "$LATEST_VERSION" ]; then
     exit 1
 fi
 
-echo "default.nix updated. Run 'nix build' to test."
+echo "default.nix updated."
+
+echo "Running nix flake update..."
+nix flake update
+
+if [ -z "$(git status --porcelain)" ]; then
+    echo "No changes to commit."
+else
+    echo "Committing changes..."
+    git add -A
+    git commit -m "chore: update to v${LATEST_VERSION}"
+fi
+
+if git rev-parse "v${LATEST_VERSION}" >/dev/null 2>&1; then
+    echo "Tag v${LATEST_VERSION} already exists."
+else
+    echo "Tagging v${LATEST_VERSION}..."
+    git tag "v${LATEST_VERSION}"
+fi
+
+echo "Pushing to origin..."
+git push -f origin main
+git push -f origin "v${LATEST_VERSION}"
